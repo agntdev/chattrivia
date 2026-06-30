@@ -26,7 +26,7 @@
           {
             "method": "sendMessage",
             "payload": {
-              "text": "Send me a question to add. Use this format on ONE line:\n\n<code>Category|Question text|Choice A|Choice B|Choice C|Choice D|CorrectIndex(0-3)</code>\n\nExample:\n<code>Science|What is H2O?|Water|Salt|Sugar|Oil|0</code>"
+              "text": "Send me a question to add. Use this format on ONE line:\n\n<code>Category|Question text|Choice A|Choice B|Choice C|Choice D|CorrectIndex(0-3)[|Explanation]</code>\n\nExample:\n<code>Science|What is H2O?|Water|Salt|Sugar|Oil|0|Water is H₂O — two hydrogen and one oxygen.</code>"
             }
           }
         ]
@@ -43,7 +43,7 @@
           {
             "method": "sendMessage",
             "payload": {
-              "text": "Send me a CSV text (or paste it). Each line is one question:\n\n<code>Category,Question,Choice A,Choice B,Choice C,Choice D,CorrectIndex</code>\n\nExample:\n<code>Science,What is H2O?,Water,Salt,Sugar,Oil,0</code>"
+              "text": "Send me a CSV text (or paste it). Each line is one question:\n\n<code>Category,Question,Choice A,Choice B,Choice C,Choice D,CorrectIndex[,Explanation]</code>\n\nExample:\n<code>Science,What is H2O?,Water,Salt,Sugar,Oil,0,Water is H₂O — two hydrogen and one oxygen.</code>"
             }
           }
         ]
@@ -120,10 +120,10 @@
     ]
   },
   {
-    "name": "/trivia_add shows question management",
+    "name": "/trivia add opens question management",
     "steps": [
       {
-        "send": { "text": "/trivia_add" },
+        "send": { "text": "/trivia add" },
         "expect": [
           {
             "method": "sendMessage",

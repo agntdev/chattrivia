@@ -190,9 +190,9 @@ function countKeyboard(): ReturnType<typeof menuKeyboard> {
 const composer = new Composer<Ctx>();
 
 // ── Orphan game cleanup (called after bot starts or on a game access) ────────
-async function cleanupOrphanGame(chatId: number): Promise<void> {
+async function cleanupOrphanGame(chatId: number, api?: Ctx["api"]): Promise<string | null> {
   const game = await getActiveGame(chatId);
-  if (!game) return;
+  if (!game) return null;
 
   const elapsed = now() - (game.lastActivityAt ?? game.createdAt);
   const timeout = (game.state === "active" || game.state === "revealing")
@@ -201,21 +201,21 @@ async function cleanupOrphanGame(chatId: number): Promise<void> {
 
   if (elapsed > timeout) {
     await deleteActiveGame(chatId);
-    // Attempt to notify the chat if we have context
-    try {
-      // Cannot notify without a ctx — this runs in the background.
-      // The next user who interacts will see "no active game".
-    } catch {
-      // Best-effort
+    // Notify the chat if we have an API handle
+    const msg = "⏰ A game was abandoned and has been cleaned up. Tap Start to begin a new one!";
+    if (api) {
+      try {
+        await api.sendMessage(chatId, msg);
+      } catch {
+        // Best-effort — chat may have removed the bot or other transient issue
+      }
     }
+    return msg;
   }
+  return null;
 }
 
 // ── Start game flow (button or /trivia start) ───────────────────────────────
-composer.command("trivia_start", async (ctx) => {
-  await startSetup(ctx);
-});
-
 composer.command("trivia", async (ctx) => {
   const arg = ctx.message?.text?.split(/\s+/).slice(1)[0];
   if (arg === "start") await startSetup(ctx);
@@ -242,8 +242,8 @@ composer.callbackQuery("trivia:start", async (ctx) => {
 async function startSetup(ctx: Ctx) {
   const chatId = ctx.chat!.id;
 
-  // Clean up orphan games
-  await cleanupOrphanGame(chatId);
+  // Clean up orphan games — if one was cleaned, let the user know
+  const cleanedMsg = await cleanupOrphanGame(chatId, ctx.api);
 
   // Check no active game
   const existing = await getActiveGame(chatId);
@@ -335,7 +335,7 @@ async function launchGame(ctx: Ctx, category: string, count: number) {
   const chatId = ctx.chat!.id;
 
   // Clean up orphans
-  await cleanupOrphanGame(chatId);
+  await cleanupOrphanGame(chatId, ctx.api);
 
   // Gather questions BEFORE the atomic check — question bank is independent of
   // game state, so gathering first keeps the critical section small.
@@ -413,26 +413,31 @@ async function launchGame(ctx: Ctx, category: string, count: number) {
 
 // ── Post a question ─────────────────────────────────────────────────────────
 async function postQuestion(ctx: Ctx, game: ActiveGame) {
-  const q = game.questions[game.currentIndex];
-  if (!q) return finishGame(ctx, game);
+  // Re-fetch from storage — the game may have been cancelled/deleted between
+  // scheduling and execution (e.g. during the 2s pre-question delay).
+  const current = await getActiveGame(game.chatId);
+  if (!current || current.state === "finished") return;
+
+  const q = current.questions[current.currentIndex];
+  if (!q) return finishGame(ctx, current);
 
   const timeLeft = 12;
-  game.startTime = now();
-  game.state = "active";
-  game.playerAnswers = {};
-  game.lastActivityAt = now();
-  await saveActiveGame(game);
+  current.startTime = now();
+  current.state = "active";
+  current.playerAnswers = {};
+  current.lastActivityAt = now();
+  await saveActiveGame(current);
 
   const msg = await ctx.reply(
-    formatQuestion(q, game.currentIndex + 1, game.questionCount, timeLeft),
+    formatQuestion(q, current.currentIndex + 1, current.questionCount, timeLeft),
     { reply_markup: answerKeyboard() },
   );
 
-  game.messageId = msg.message_id;
-  await saveActiveGame(game);
+  current.messageId = msg.message_id;
+  await saveActiveGame(current);
 
   // Start the countdown timer
-  void runCountdown(ctx, game, q);
+  void runCountdown(ctx, current, q);
 }
 
 // ── Countdown ───────────────────────────────────────────────────────────────
@@ -564,13 +569,17 @@ async function finishQuestion(ctx: Ctx, game: ActiveGame) {
 async function finishGame(ctx: Ctx, game: ActiveGame) {
   const players = Object.values(game.players);
 
-  // Find the round winner (by roundScore)
-  const top = players.sort((a, b) => b.roundScore - a.roundScore)[0];
+  // Identify ALL players with the top round score (ties share the win).
+  const sorted = [...players].sort((a, b) => b.roundScore - a.roundScore);
+  const topScore = sorted[0]?.roundScore ?? 0;
+  const winnerIds = new Set(
+    topScore > 0 ? sorted.filter((p) => p.roundScore === topScore).map((p) => p.userId) : [],
+  );
 
   // Persist player stats
   for (const p of players) {
     const existing = await getPlayer(game.chatId, p.userId);
-    const isWinner = top && p.userId === top.userId && top.roundScore > 0;
+    const isWinner = winnerIds.has(p.userId);
     await savePlayer(game.chatId, {
       userId: p.userId,
       firstName: p.firstName,
@@ -583,8 +592,8 @@ async function finishGame(ctx: Ctx, game: ActiveGame) {
 
   // Persist round result to the Scoreboard entity
   const roundNumber = await nextRoundNumber(game.chatId);
-  const roundWinner = top && top.roundScore > 0
-    ? { userId: top.userId, firstName: top.firstName, roundScore: top.roundScore }
+  const roundWinner = topScore > 0 && sorted[0]
+    ? { userId: sorted[0].userId, firstName: sorted[0].firstName, roundScore: topScore }
     : null;
   await saveRoundResult({
     chatId: game.chatId,
@@ -610,15 +619,11 @@ async function finishGame(ctx: Ctx, game: ActiveGame) {
 }
 
 // ── Cancel game ─────────────────────────────────────────────────────────────
-composer.command("trivia_stop", async (ctx) => {
-  await cancelGame(ctx);
-});
-
 async function cancelGame(ctx: Ctx) {
   const chatId = ctx.chat!.id;
 
   // Clean up orphans first
-  await cleanupOrphanGame(chatId);
+  await cleanupOrphanGame(chatId, ctx.api);
 
   const game = await getActiveGame(chatId);
   if (!game) {
@@ -640,16 +645,16 @@ function delay(ms: number): Promise<void> {
 }
 
 // ── Periodic orphan cleanup (called at bot startup) ─────────────────────────
-// We export startOrphanSweep so bot.ts can start a lightweight interval.
+// We export startOrphanSweep so index.ts can start a lightweight interval.
 let orphanSweepInterval: ReturnType<typeof setInterval> | undefined;
 
-export function startOrphanSweep(chatIds: () => Promise<number[]>): void {
+export function startOrphanSweep(chatIds: () => Promise<number[]>, api?: Ctx["api"]): void {
   if (orphanSweepInterval) return;
   orphanSweepInterval = setInterval(async () => {
     try {
       const ids = await chatIds();
       for (const chatId of ids) {
-        await cleanupOrphanGame(chatId);
+        await cleanupOrphanGame(chatId, api);
       }
     } catch {
       // Best-effort; never crash the sweep

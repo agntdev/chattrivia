@@ -16,8 +16,9 @@ async function main() {
 
   // Periodically sweep abandoned games (no activity for 5 min) so stale state
   // doesn't block new games. The sweep reads the global game-index from persistent
-  // storage — no keyspace scan.
-  startOrphanSweep(getActiveGameChatIds);
+  // storage — no keyspace scan. Pass the bot's API handle so the sweep can send
+  // timeout-alert messages to affected chats.
+  startOrphanSweep(getActiveGameChatIds, bot.api);
 
   // Clean up the sweep interval on shutdown so the process can exit cleanly.
   process.once("SIGTERM", stopOrphanSweep);
