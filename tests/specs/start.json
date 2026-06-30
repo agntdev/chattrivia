@@ -1,13 +1,37 @@
 [
   {
-    "name": "/start replies with the welcome + main menu",
+    "name": "/start shows main menu with trivia options",
     "steps": [
       {
         "send": { "text": "/start" },
         "expect": [
           {
             "method": "sendMessage",
-            "payload": { "text": "👋 Welcome! Tap a button below to get started." }
+            "payload": {
+              "text": "👋 Welcome! Tap a button below to get started."
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "menu:main callback re-renders main menu",
+    "steps": [
+      {
+        "send": { "text": "/start" },
+        "expect": [
+          { "method": "sendMessage" }
+        ]
+      },
+      {
+        "send": { "callback": "menu:main", "messageId": 1 },
+        "expect": [
+          {
+            "method": "editMessageText",
+            "payload": {
+              "text": "👋 Welcome! Tap a button below to get started."
+            }
           }
         ]
       }

@@ -1,0 +1,182 @@
+[
+  {
+    "name": "trivia:start callback shows category picker",
+    "steps": [
+      {
+        "send": { "callback": "trivia:start", "messageId": 1 },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          {
+            "method": "sendMessage",
+            "payload": {
+              "text": "Pick a category:"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "selecting category shows count picker",
+    "steps": [
+      {
+        "send": { "callback": "trivia:start", "messageId": 1 },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          { "method": "sendMessage" }
+        ]
+      },
+      {
+        "send": { "callback": "trivia:cat:Science", "messageId": 1001 },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          {
+            "method": "editMessageText",
+            "payload": {
+              "text": "Category: <b>Science</b>\n\nHow many questions?"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "selecting count shows confirmation",
+    "steps": [
+      {
+        "send": { "callback": "trivia:start", "messageId": 1 },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          { "method": "sendMessage" }
+        ]
+      },
+      {
+        "send": { "callback": "trivia:cat:Science", "messageId": 1001 },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          { "method": "editMessageText" }
+        ]
+      },
+      {
+        "send": { "callback": "trivia:count:10", "messageId": 1001 },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          {
+            "method": "editMessageText",
+            "payload": {
+              "text": "Start a <b>Science</b> trivia round with 10 questions?\n\nEach question has a 12-second timer. First to answer correctly gets the most points!"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "confirming launch announces game",
+    "steps": [
+      {
+        "send": { "callback": "trivia:start", "messageId": 1 },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          { "method": "sendMessage" }
+        ]
+      },
+      {
+        "send": { "callback": "trivia:cat:Science", "messageId": 1001 },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          { "method": "editMessageText" }
+        ]
+      },
+      {
+        "send": { "callback": "trivia:count:5", "messageId": 1001 },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          { "method": "editMessageText" }
+        ]
+      },
+      {
+        "send": { "callback": "trivia:go:Science:5:yes", "messageId": 1001 },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          {
+            "method": "sendMessage",
+            "payload": {
+              "text": "🎮 <b>Science</b> trivia starting now!\n5 questions • 12 seconds each • 20–100 pts per correct answer\n\nGet ready…"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "cancelling game setup from confirmation",
+    "steps": [
+      {
+        "send": { "callback": "trivia:start", "messageId": 1 },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          { "method": "sendMessage" }
+        ]
+      },
+      {
+        "send": { "callback": "trivia:cat:Science", "messageId": 1001 },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          { "method": "editMessageText" }
+        ]
+      },
+      {
+        "send": { "callback": "trivia:count:5", "messageId": 1001 },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          { "method": "editMessageText" }
+        ]
+      },
+      {
+        "send": { "callback": "trivia:go:Science:5:no", "messageId": 1001 },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          {
+            "method": "editMessageText",
+            "payload": {
+              "text": "Game cancelled. Tap /start to begin again."
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "/trivia_start command shows category picker",
+    "steps": [
+      {
+        "send": { "text": "/trivia_start" },
+        "expect": [
+          {
+            "method": "sendMessage",
+            "payload": {
+              "text": "Pick a category:"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "/trivia_stop without active game shows message",
+    "steps": [
+      {
+        "send": { "text": "/trivia_stop" },
+        "expect": [
+          {
+            "method": "sendMessage",
+            "payload": {
+              "text": "No game is running right now."
+            }
+          }
+        ]
+      }
+    ]
+  }
+]

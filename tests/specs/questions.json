@@ -1,0 +1,117 @@
+[
+  {
+    "name": "trivia:qmanage shows custom question bank empty state",
+    "steps": [
+      {
+        "send": { "callback": "trivia:qmanage", "messageId": 1 },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          {
+            "method": "editMessageText",
+            "payload": {
+              "text": "📝 <b>Custom Questions</b>\n\nNo custom questions yet. Tap ➕ Add to create one, or send a CSV file to import in bulk."
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "trivia:qadd shows format instructions",
+    "steps": [
+      {
+        "send": { "callback": "trivia:qadd" },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          {
+            "method": "sendMessage",
+            "payload": {
+              "text": "Send me a question to add. Use this format on ONE line:\n\n<code>Category|Question text|Choice A|Choice B|Choice C|Choice D|CorrectIndex(0-3)</code>\n\nExample:\n<code>Science|What is H2O?|Water|Salt|Sugar|Oil|0</code>"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "trivia:qcsv shows CSV instructions",
+    "steps": [
+      {
+        "send": { "callback": "trivia:qcsv" },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          {
+            "method": "sendMessage",
+            "payload": {
+              "text": "Send me a CSV text (or paste it). Each line is one question:\n\n<code>Category,Question,Choice A,Choice B,Choice C,Choice D,CorrectIndex</code>\n\nExample:\n<code>Science,What is H2O?,Water,Salt,Sugar,Oil,0</code>"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "importing a question via pipe format",
+    "steps": [
+      {
+        "send": { "text": "Science|What is H2O?|Water|Salt|Sugar|Oil|0" },
+        "expect": [
+          {
+            "method": "sendMessage",
+            "payload": {
+              "text": "✅ Added 1 question."
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "importing a question via CSV format",
+    "steps": [
+      {
+        "send": { "text": "History,Who was first US president?,Washington,Adams,Jefferson,Franklin,0" },
+        "expect": [
+          {
+            "method": "sendMessage",
+            "payload": {
+              "text": "✅ Added 1 question."
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "importing malformed question shows error",
+    "steps": [
+      {
+        "send": { "text": "Science|What is H2O?|Water|Salt|Sugar|Oil|bad_index" },
+        "expect": [
+          {
+            "method": "sendMessage",
+            "payload": {
+              "text": "❌ No questions added.\n\nLine 1: correct index must be 0–3, got \"bad_index\""
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "/trivia_add shows question management",
+    "steps": [
+      {
+        "send": { "text": "/trivia_add" },
+        "expect": [
+          {
+            "method": "sendMessage",
+            "payload": {
+              "text": "📝 <b>Custom Questions</b>\n\nNo custom questions yet. Tap ➕ Add to create one, or send a CSV file to import in bulk."
+            }
+          }
+        ]
+      }
+    ]
+  }
+]

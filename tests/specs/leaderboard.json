@@ -1,0 +1,51 @@
+[
+  {
+    "name": "/leaderboard shows empty state for new chat",
+    "steps": [
+      {
+        "send": { "text": "/leaderboard" },
+        "expect": [
+          {
+            "method": "sendMessage",
+            "payload": {
+              "text": "No scores yet — start a game and climb the board!"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "leaderboard button shows empty state",
+    "steps": [
+      {
+        "send": { "callback": "leaderboard", "messageId": 1 },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          {
+            "method": "editMessageText",
+            "payload": {
+              "text": "No scores yet — start a game and climb the board!"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "/mystats shows no games for new user",
+    "steps": [
+      {
+        "send": { "text": "/mystats" },
+        "expect": [
+          {
+            "method": "sendMessage",
+            "payload": {
+              "text": "You haven't played in this chat yet. Start a game to get on the board!"
+            }
+          }
+        ]
+      }
+    ]
+  }
+]
