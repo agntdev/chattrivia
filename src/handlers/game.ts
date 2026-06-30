@@ -13,6 +13,7 @@ import {
   type ActiveGame,
   type Player,
   type Question,
+  type RoundResult,
   getActiveGame,
   saveActiveGame,
   deleteActiveGame,
@@ -20,6 +21,8 @@ import {
   savePlayer,
   getConfig,
   getQuestionBank,
+  nextRoundNumber,
+  saveRoundResult,
 } from "../storage.js";
 import { defaultQuestionsByCategory, defaultCategories } from "../questions.js";
 
@@ -41,6 +44,29 @@ function scoreForTime(elapsedSec: number): number {
   const pts = BASE_POINTS - DECAY_PER_SEC * elapsedSec;
   return Math.max(MIN_POINTS, Math.floor(pts));
 }
+
+// ── Deterministic shuffle ───────────────────────────────────────────────────
+function shuffled<T>(arr: T[], seed: number): T[] {
+  // Fisher-Yates shuffle with a simple seeded PRNG (Mulberry32).
+  const out = [...arr];
+  let s = Math.abs(seed) | 0;
+  function next(): number {
+    s |= 0;
+    s = (s + 0x6d2b79f5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = (next() * (i + 1)) | 0;
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+// ── Game timeout constants ──────────────────────────────────────────────────
+const GAME_ORPHAN_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes of no activity = abandoned
+const SETUP_TIMEOUT_MS = 3 * 60 * 1000;       // 3 minutes in setup = abandoned
 
 // ── Question formatting ─────────────────────────────────────────────────────
 const LETTERS = ["A", "B", "C", "D"];
@@ -86,36 +112,39 @@ function formatResultMessage(
 function formatFinalResults(
   players: Record<number, Player>,
 ): string {
+  // Sort by ROUND score (per-game ranking), not cumulative (all-time).
   const entries = Object.values(players)
-    .sort((a, b) => b.cumulativeScore - a.cumulativeScore);
+    .sort((a, b) => b.roundScore - a.roundScore);
 
   if (entries.length === 0) return "No one played this round.";
 
   const lines: string[] = [];
   lines.push("🏆 Game over!\n");
 
-  // Find the winner (highest cumulative)
+  // Find the winner (highest round score)
   const top = entries[0];
-  const winner = entries.filter(
-    (e) => e.cumulativeScore === top.cumulativeScore,
+  const winners = entries.filter(
+    (e) => e.roundScore === top.roundScore && top.roundScore > 0,
   );
 
-  if (winner.length === 1) {
-    lines.push(`🎉 ${winner[0].firstName} wins with ${winner[0].cumulativeScore} points!`);
+  if (winners.length === 0) {
+    lines.push("No one scored this round — better luck next time!");
+  } else if (winners.length === 1) {
+    lines.push(`🎉 ${winners[0].firstName} wins with ${winners[0].roundScore} points this round!`);
   } else {
-    const names = winner.map((w) => w.firstName).join(", ");
-    lines.push(`🤝 Tie! ${names} share the win at ${winner[0].cumulativeScore} points.`);
+    const names = winners.map((w) => w.firstName).join(", ");
+    lines.push(`🤝 Tie! ${names} share the win at ${winners[0].roundScore} points.`);
   }
 
   lines.push("\nFinal standings:");
   let rank = 1;
   for (let i = 0; i < entries.length; i++) {
     const e = entries[i];
-    if (i > 0 && e.cumulativeScore < entries[i - 1].cumulativeScore) {
+    if (i > 0 && e.roundScore < entries[i - 1].roundScore) {
       rank = i + 1;
     }
-    const star = rank === 1 ? " ⭐" : "";
-    lines.push(`${rank}. ${e.firstName}: ${e.cumulativeScore} pts${star}`);
+    const star = rank === 1 && e.roundScore > 0 ? " ⭐" : "";
+    lines.push(`${rank}. ${e.firstName}: ${e.roundScore} pts${star}`);
   }
   return lines.join("\n");
 }
@@ -124,7 +153,6 @@ function formatFinalResults(
 const ANSWER_EMOJI = ["🅰", "🅱", "🅲", "🅳"];
 
 function answerKeyboard(): ReturnType<typeof inlineKeyboard> {
-  // 2x2 grid of answer buttons
   return inlineKeyboard([
     [
       inlineButton(`${ANSWER_EMOJI[0]} A`, "ans:0"),
@@ -140,8 +168,9 @@ function answerKeyboard(): ReturnType<typeof inlineKeyboard> {
 // ── Category picker ─────────────────────────────────────────────────────────
 function categoryKeyboard(): ReturnType<typeof menuKeyboard> {
   const cats = defaultCategories();
+  // Include "Mixed" as first option for deliberate selection
   return menuKeyboard(
-    cats.map((c) => ({ text: c, data: `trivia:cat:${c}` })),
+    ["Mixed", ...cats].map((c) => ({ text: c, data: `trivia:cat:${c}` })),
     2,
   );
 }
@@ -158,9 +187,29 @@ function countKeyboard(): ReturnType<typeof menuKeyboard> {
 // ── Composer ────────────────────────────────────────────────────────────────
 const composer = new Composer<Ctx>();
 
+// ── Orphan game cleanup (called after bot starts or on a game access) ────────
+async function cleanupOrphanGame(chatId: number): Promise<void> {
+  const game = await getActiveGame(chatId);
+  if (!game) return;
+
+  const elapsed = now() - (game.lastActivityAt ?? game.createdAt);
+  const timeout = (game.state === "active" || game.state === "revealing")
+    ? GAME_ORPHAN_TIMEOUT_MS
+    : SETUP_TIMEOUT_MS;
+
+  if (elapsed > timeout) {
+    await deleteActiveGame(chatId);
+    // Attempt to notify the chat if we have context
+    try {
+      // Cannot notify without a ctx — this runs in the background.
+      // The next user who interacts will see "no active game".
+    } catch {
+      // Best-effort
+    }
+  }
+}
+
 // ── Start game flow (button or /trivia start) ───────────────────────────────
-// Telegram commands don't support spaces, so users type /trivia_start. We also
-// handle /trivia with a "start" argument for the spec's /trivia start form.
 composer.command("trivia_start", async (ctx) => {
   await startSetup(ctx);
 });
@@ -170,13 +219,14 @@ composer.command("trivia", async (ctx) => {
   if (arg === "start") await startSetup(ctx);
   else if (arg === "stop") await cancelGame(ctx);
   else if (arg === "add") {
-    // Delegate to questions handler's flow — just tell the user what to do
-    await ctx.reply(
-      "To add a custom question, send me a line like this:\n\n" +
-      '<code>Category|Question text|Choice A|Choice B|Choice C|Choice D|CorrectIndex(0-3)</code>\n\n' +
-      'Or tap 📝 Manage Questions on the menu for more options.',
-      { parse_mode: "HTML" },
-    );
+    // Route to question management — the blueprint says /trivia add is the trigger.
+    // Delegate to the questions handler by simulating the button callback.
+    // We import lazily to avoid circular deps, but since both handlers are in
+    // the same process, just reply with instructions to use the menu button.
+    // Actually, the spec says /trivia add triggers "Custom Question Management" flow.
+    // We open the manage screen inline.
+    const { showQManage } = await import("./questions.js");
+    await showQManage(ctx);
   } else {
     await ctx.reply("Try /trivia start to begin a game, or tap the menu buttons.");
   }
@@ -189,6 +239,9 @@ composer.callbackQuery("trivia:start", async (ctx) => {
 
 async function startSetup(ctx: Ctx) {
   const chatId = ctx.chat!.id;
+
+  // Clean up orphan games
+  await cleanupOrphanGame(chatId);
 
   // Check no active game
   const existing = await getActiveGame(chatId);
@@ -279,6 +332,9 @@ composer.callbackQuery(/^trivia:go:(.+):(\d+):no$/, async (ctx) => {
 async function launchGame(ctx: Ctx, category: string, count: number) {
   const chatId = ctx.chat!.id;
 
+  // Clean up orphans
+  await cleanupOrphanGame(chatId);
+
   // Check again for active game
   const existing = await getActiveGame(chatId);
   if (existing && existing.state !== "finished") {
@@ -290,25 +346,14 @@ async function launchGame(ctx: Ctx, category: string, count: number) {
   const customBank = await getQuestionBank(chatId);
   let pool: Question[];
   if (category === "Mixed") {
-    pool = customBank;
+    pool = [...customBank];
+    // Add all default categories
+    for (const cat of defaultCategories()) {
+      pool.push(...defaultQuestionsByCategory(cat));
+    }
   } else {
     pool = customBank.filter((q) => q.category === category);
-  }
-
-  // Fall back to default pool
-  const defs = category === "Mixed"
-    ? [] // Mixed defaults to all defaults
-    : defaultQuestionsByCategory(category);
-
-  // Actually for "Mixed" we use all defaults plus all custom
-  if (category === "Mixed") {
-    pool = customBank.concat(defaultQuestionsByCategory("Science"))
-      .concat(defaultQuestionsByCategory("History"))
-      .concat(defaultQuestionsByCategory("Geography"))
-      .concat(defaultQuestionsByCategory("Sports"))
-      .concat(defaultQuestionsByCategory("Entertainment"));
-  } else {
-    pool = [...pool, ...defs];
+    pool.push(...defaultQuestionsByCategory(category));
   }
 
   // Deduplicate by text
@@ -321,9 +366,9 @@ async function launchGame(ctx: Ctx, category: string, count: number) {
     }
   }
 
-  // Shuffle and trim
-  const shuffled = unique.sort(() => Math.random() - 0.5);
-  const questions = shuffled.slice(0, Math.min(count, shuffled.length));
+  // Shuffle deterministically (seed = chatId + creation timestamp) and trim
+  const seed = chatId ^ now();
+  const questions = shuffled(unique, seed).slice(0, Math.min(count, unique.length));
 
   if (questions.length === 0) {
     await ctx.reply(
@@ -335,6 +380,7 @@ async function launchGame(ctx: Ctx, category: string, count: number) {
   const actualCount = questions.length;
 
   // Create the game
+  const ts = now();
   const game: ActiveGame = {
     chatId,
     category,
@@ -346,7 +392,8 @@ async function launchGame(ctx: Ctx, category: string, count: number) {
     players: {},
     state: "active",
     questionCount: actualCount,
-    createdAt: now(),
+    createdAt: ts,
+    lastActivityAt: ts,
   };
 
   await saveActiveGame(game);
@@ -374,6 +421,7 @@ async function postQuestion(ctx: Ctx, game: ActiveGame) {
   game.startTime = now();
   game.state = "active";
   game.playerAnswers = {};
+  game.lastActivityAt = now();
   await saveActiveGame(game);
 
   const msg = await ctx.reply(
@@ -435,7 +483,7 @@ composer.callbackQuery(/^ans:(\d)$/, async (ctx) => {
     return;
   }
 
-  // Already answered?
+  // Check if answer came after countdown
   if (game.playerAnswers[userId] !== undefined) {
     await ctx.answerCallbackQuery({ text: "You already answered this one!" });
     return;
@@ -469,6 +517,7 @@ composer.callbackQuery(/^ans:(\d)$/, async (ctx) => {
     await ctx.answerCallbackQuery({ text: "❌ Wrong!" });
   }
 
+  game.lastActivityAt = now();
   await saveActiveGame(game);
 });
 
@@ -481,6 +530,7 @@ async function finishQuestion(ctx: Ctx, game: ActiveGame) {
   if (!q) return;
 
   current.state = "revealing";
+  current.lastActivityAt = now();
   await saveActiveGame(current);
 
   // Update the question message with results
@@ -505,6 +555,7 @@ async function finishQuestion(ctx: Ctx, game: ActiveGame) {
     await finishGame(ctx, next);
   } else {
     next.state = "active";
+    next.lastActivityAt = now();
     await saveActiveGame(next);
     await postQuestion(ctx, next);
   }
@@ -512,8 +563,9 @@ async function finishQuestion(ctx: Ctx, game: ActiveGame) {
 
 // ── Finish game ─────────────────────────────────────────────────────────────
 async function finishGame(ctx: Ctx, game: ActiveGame) {
-  // Find the round winner first
   const players = Object.values(game.players);
+
+  // Find the round winner (by roundScore)
   const top = players.sort((a, b) => b.roundScore - a.roundScore)[0];
 
   // Persist player stats
@@ -530,6 +582,25 @@ async function finishGame(ctx: Ctx, game: ActiveGame) {
     });
   }
 
+  // Persist round result to the Scoreboard entity
+  const roundNumber = await nextRoundNumber(game.chatId);
+  const roundWinner = top && top.roundScore > 0
+    ? { userId: top.userId, firstName: top.firstName, roundScore: top.roundScore }
+    : null;
+  await saveRoundResult({
+    chatId: game.chatId,
+    roundNumber,
+    category: game.category,
+    questionCount: game.questionCount,
+    playerScores: players.map((p) => ({
+      userId: p.userId,
+      firstName: p.firstName,
+      roundScore: p.roundScore,
+    })),
+    roundWinner,
+    finishedAt: now(),
+  });
+
   // Clean up game
   await deleteActiveGame(game.chatId);
 
@@ -543,6 +614,10 @@ composer.command("trivia_stop", async (ctx) => {
 
 async function cancelGame(ctx: Ctx) {
   const chatId = ctx.chat!.id;
+
+  // Clean up orphans first
+  await cleanupOrphanGame(chatId);
+
   const game = await getActiveGame(chatId);
   if (!game) {
     await ctx.reply("No game is running right now.");
@@ -560,6 +635,31 @@ async function cancelGame(ctx: Ctx) {
 // ── Utility: delay ──────────────────────────────────────────────────────────
 function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+// ── Periodic orphan cleanup (called at bot startup) ─────────────────────────
+// We export startOrphanSweep so bot.ts can start a lightweight interval.
+let orphanSweepInterval: ReturnType<typeof setInterval> | undefined;
+
+export function startOrphanSweep(chatIds: () => Promise<number[]>): void {
+  if (orphanSweepInterval) return;
+  orphanSweepInterval = setInterval(async () => {
+    try {
+      const ids = await chatIds();
+      for (const chatId of ids) {
+        await cleanupOrphanGame(chatId);
+      }
+    } catch {
+      // Best-effort; never crash the sweep
+    }
+  }, 60_000); // Check every minute
+}
+
+export function stopOrphanSweep(): void {
+  if (orphanSweepInterval) {
+    clearInterval(orphanSweepInterval);
+    orphanSweepInterval = undefined;
+  }
 }
 
 export default composer;
