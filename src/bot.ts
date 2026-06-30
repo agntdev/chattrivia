@@ -1,12 +1,15 @@
 import { Composer } from "grammy";
 import { readdirSync } from "node:fs";
 import { createBot, type BotContext } from "./toolkit/index.js";
+import { __resetStore } from "./storage.js";
 
 // The per-chat session shape (ephemeral conversation state only). Extend as the
 // bot grows. Durable domain data must NOT live here — use the toolkit's
 // persistent storage (see AGENTS.md).
 export interface Session {
-  // example: step?: "awaiting_amount";
+  // Ephemeral game setup state (category flows between callbacks without
+  // needing to parse it from message text).
+  setupCategory?: string;
 }
 
 export type Ctx = BotContext<Session>;
@@ -18,6 +21,9 @@ export type Ctx = BotContext<Session>;
  * Composer — NEVER edit this file (concurrent feature PRs would conflict).
  */
 export async function buildBot(token: string) {
+  // Reset the persistent store singleton so each spec run gets a clean slate.
+  __resetStore();
+
   const bot = createBot<Session>(token, {
     initial: () => ({}),
   });
