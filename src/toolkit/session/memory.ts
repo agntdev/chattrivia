@@ -31,4 +31,15 @@ export class MemorySessionStorage<T> implements StorageAdapter<T> {
   readAllKeys(): string[] {
     return [...this.store.keys()];
   }
+
+  /**
+   * Atomic check-and-set: writes value only if key does NOT already exist.
+   * Returns true if the key was created, false if it already existed.
+   * Synchronous (no await) so the event loop can't interleave.
+   */
+  setIfNotExists(key: string, value: T): boolean {
+    if (this.store.has(key)) return false;
+    this.store.set(key, value);
+    return true;
+  }
 }
