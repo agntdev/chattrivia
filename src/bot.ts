@@ -10,6 +10,11 @@ export interface Session {
   // Ephemeral game setup state (category flows between callbacks without
   // needing to parse it from message text).
   setupCategory?: string;
+  // Question import state: when the user tapped "Add one manually" or "Import CSV",
+  // we gate text interception to avoid false positives from normal chat messages.
+  questionImportMode?: "pipe" | "csv";
+  // Index of the question being edited (set during edit flow)
+  questionEditIndex?: number;
 }
 
 export type Ctx = BotContext<Session>;

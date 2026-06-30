@@ -51,8 +51,15 @@
     ]
   },
   {
-    "name": "importing a question via pipe format",
+    "name": "importing a question via pipe format (session-gated)",
     "steps": [
+      {
+        "send": { "callback": "trivia:qadd" },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          { "method": "sendMessage" }
+        ]
+      },
       {
         "send": { "text": "Science|What is H2O?|Water|Salt|Sugar|Oil|0" },
         "expect": [
@@ -67,8 +74,15 @@
     ]
   },
   {
-    "name": "importing a question via CSV format",
+    "name": "importing a question via CSV format (session-gated)",
     "steps": [
+      {
+        "send": { "callback": "trivia:qcsv" },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          { "method": "sendMessage" }
+        ]
+      },
       {
         "send": { "text": "History,Who was first US president?,Washington,Adams,Jefferson,Franklin,0" },
         "expect": [
@@ -85,6 +99,13 @@
   {
     "name": "importing malformed question shows error",
     "steps": [
+      {
+        "send": { "callback": "trivia:qadd" },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          { "method": "sendMessage" }
+        ]
+      },
       {
         "send": { "text": "Science|What is H2O?|Water|Salt|Sugar|Oil|bad_index" },
         "expect": [
@@ -103,6 +124,89 @@
     "steps": [
       {
         "send": { "text": "/trivia_add" },
+        "expect": [
+          {
+            "method": "sendMessage",
+            "payload": {
+              "text": "📝 <b>Custom Questions</b>\n\nNo custom questions yet. Tap ➕ Add to create one, or send a CSV file to import in bulk."
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "delete individual question confirmation",
+    "steps": [
+      {
+        "send": { "callback": "trivia:qadd" },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          { "method": "sendMessage" }
+        ]
+      },
+      {
+        "send": { "text": "Science|What is H2O?|Water|Salt|Sugar|Oil|0" },
+        "expect": [
+          { "method": "sendMessage" }
+        ]
+      },
+      {
+        "send": { "callback": "trivia:qdel:0", "messageId": 1 },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          {
+            "method": "editMessageText",
+            "payload": {
+              "text": "Delete this question?\n\n<b>What is H2O?</b>"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "confirm delete removes question",
+    "steps": [
+      {
+        "send": { "callback": "trivia:qadd" },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          { "method": "sendMessage" }
+        ]
+      },
+      {
+        "send": { "text": "Science|What is H2O?|Water|Salt|Sugar|Oil|0" },
+        "expect": [
+          { "method": "sendMessage" }
+        ]
+      },
+      {
+        "send": { "callback": "trivia:qdel:0", "messageId": 1 },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          { "method": "editMessageText" }
+        ]
+      },
+      {
+        "send": { "callback": "trivia:qdel:ok:0:yes", "messageId": 1 },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          {
+            "method": "editMessageText",
+            "payload": {
+              "text": "📝 <b>Custom Questions</b>\n\nNo custom questions yet. Tap ➕ Add to create one, or send a CSV file to import in bulk."
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "/trivia add opens question management (via game.ts handler)",
+    "steps": [
+      {
+        "send": { "text": "/trivia add" },
         "expect": [
           {
             "method": "sendMessage",

@@ -82,12 +82,23 @@ export interface ActiveGame {
   state: "active" | "revealing" | "finished";
   questionCount: number;   // total questions in this round
   createdAt: number;       // ms timestamp of game creation
+  lastActivityAt: number;  // ms timestamp of last activity (for timeout detection)
 }
 
 export interface GameConfig {
   chatId: number;
   questionCount: number;   // default 10
   countdownSec: number;    // default 12
+}
+
+export interface RoundResult {
+  chatId: number;
+  roundNumber: number;     // monotonically increasing per chat
+  category: string;
+  questionCount: number;
+  playerScores: { userId: number; firstName: string; roundScore: number }[];
+  roundWinner: { userId: number; firstName: string; roundScore: number } | null;
+  finishedAt: number;      // ms timestamp
 }
 
 // ── Key builders ────────────────────────────────────────────────────────────
@@ -112,6 +123,22 @@ export function keyActiveGame(chatId: number): string {
 
 export function keyConfig(chatId: number): string {
   return `${PREFIX}config:${chatId}`;
+}
+
+export function keyRoundCounter(chatId: number): string {
+  return `${PREFIX}roundcnt:${chatId}`;
+}
+
+export function keyRoundResult(chatId: number, roundNumber: number): string {
+  return `${PREFIX}round:${chatId}:${roundNumber}`;
+}
+
+export function keyRoundIndex(chatId: number): string {
+  return `${PREFIX}roundidx:${chatId}`;
+}
+
+export function keyGameIndex(): string {
+  return `${PREFIX}gameidx`;
 }
 
 // ── Domain operations ───────────────────────────────────────────────────────
@@ -176,16 +203,35 @@ export async function getActiveGame(chatId: number): Promise<ActiveGame | undefi
   return store.get<ActiveGame>(keyActiveGame(chatId));
 }
 
-/** Save the active game. */
+/** Save the active game. Also maintains the global game index for orphan sweep. */
 export async function saveActiveGame(game: ActiveGame): Promise<void> {
   const store = getStore();
   await store.set(keyActiveGame(game.chatId), game);
+  // Maintain global index of chat IDs that have an active game
+  const idx = await store.get<number[]>(keyGameIndex()) ?? [];
+  if (!idx.includes(game.chatId)) {
+    idx.push(game.chatId);
+    await store.set(keyGameIndex(), idx);
+  }
 }
 
-/** Delete the active game (when finished or cancelled). */
+/** Delete the active game (when finished or cancelled). Also cleans the index. */
 export async function deleteActiveGame(chatId: number): Promise<void> {
   const store = getStore();
   await store.delete(keyActiveGame(chatId));
+  // Remove from global index
+  const idx = await store.get<number[]>(keyGameIndex()) ?? [];
+  const pos = idx.indexOf(chatId);
+  if (pos >= 0) {
+    idx.splice(pos, 1);
+    await store.set(keyGameIndex(), idx);
+  }
+}
+
+/** Get all chat IDs that currently have an active game (for orphan sweep). */
+export async function getActiveGameChatIds(): Promise<number[]> {
+  const store = getStore();
+  return (await store.get<number[]>(keyGameIndex())) ?? [];
 }
 
 /** Get game config for a chat. */
@@ -200,4 +246,43 @@ export async function getConfig(chatId: number): Promise<GameConfig> {
 export async function saveConfig(config: GameConfig): Promise<void> {
   const store = getStore();
   await store.set(keyConfig(config.chatId), config);
+}
+
+/** Increment and return the next round number for a chat. */
+export async function nextRoundNumber(chatId: number): Promise<number> {
+  const store = getStore();
+  const current = await store.get<number>(keyRoundCounter(chatId));
+  const next = (current ?? 0) + 1;
+  await store.set(keyRoundCounter(chatId), next);
+  return next;
+}
+
+/** Save a round result and maintain the round index. */
+export async function saveRoundResult(result: RoundResult): Promise<void> {
+  const store = getStore();
+  await store.set(keyRoundResult(result.chatId, result.roundNumber), result);
+  // Maintain index of round numbers for this chat
+  const idx = await store.get<number[]>(keyRoundIndex(result.chatId)) ?? [];
+  if (!idx.includes(result.roundNumber)) {
+    idx.push(result.roundNumber);
+    await store.set(keyRoundIndex(result.chatId), idx);
+  }
+}
+
+/** Get all round results for a chat. */
+export async function getRoundResults(chatId: number): Promise<RoundResult[]> {
+  const store = getStore();
+  const nums = await store.get<number[]>(keyRoundIndex(chatId)) ?? [];
+  const results: RoundResult[] = [];
+  for (const n of nums) {
+    const r = await store.get<RoundResult>(keyRoundResult(chatId, n));
+    if (r) results.push(r);
+  }
+  return results.sort((a, b) => b.roundNumber - a.roundNumber);
+}
+
+/** Get the most recent round result. */
+export async function getLastRoundResult(chatId: number): Promise<RoundResult | undefined> {
+  const results = await getRoundResults(chatId);
+  return results[0] ?? undefined;
 }

@@ -24,7 +24,7 @@ registerMainMenuItem({
 
 const composer = new Composer<Ctx>();
 
-// ── Entry: manage questions menu ────────────────────────────────────────────
+// ── Entry: /trivia_add command ──────────────────────────────────────────────
 composer.command("trivia_add", async (ctx) => {
   await showQManage(ctx);
 });
@@ -34,18 +34,21 @@ composer.callbackQuery("trivia:qmanage", async (ctx) => {
   await showQManage(ctx);
 });
 
-async function showQManage(ctx: Ctx) {
+// Exported so game.ts /trivia add can also open the manage screen.
+export async function showQManage(ctx: Ctx) {
+  const chatId = ctx.chat!.id;
+
   // Admin check for group chats
   if (ctx.chat?.type !== "private" && !(await isAdmin(ctx))) {
+    const deny = "Only group admins can manage questions.";
     if (ctx.callbackQuery?.message) {
-      await ctx.editMessageText("Only group admins can manage questions.");
+      await ctx.editMessageText(deny);
     } else {
-      await ctx.reply("Only group admins can manage questions.");
+      await ctx.reply(deny);
     }
     return;
   }
 
-  const chatId = ctx.chat!.id;
   const bank = await getQuestionBank(chatId);
 
   const lines: string[] = [];
@@ -54,24 +57,51 @@ async function showQManage(ctx: Ctx) {
     lines.push("No custom questions yet. Tap ➕ Add to create one, or send a CSV file to import in bulk.");
   } else {
     lines.push(`${bank.length} custom question${bank.length === 1 ? "" : "s"} in your bank.\n`);
-    // Show first few
-    const preview = bank.slice(0, 5);
-    for (let i = 0; i < preview.length; i++) {
-      lines.push(`${i + 1}. ${preview[i].text.slice(0, 50)}${preview[i].text.length > 50 ? "…" : ""}`);
+
+    // Build keyboard with per-question delete buttons
+    const rows: ReturnType<typeof inlineButton>[][] = [];
+
+    // Show up to 10 questions with delete and edit buttons
+    const show = bank.slice(0, 10);
+    for (let i = 0; i < show.length; i++) {
+      const q = show[i];
+      const label =
+        q.text.length > 40 ? q.text.slice(0, 40) + "…" : q.text;
+      lines.push(`${i + 1}. [${q.category}] ${label}`);
+      // Add edit + delete buttons for this question
+      rows.push([
+        inlineButton(`✏️ Edit #${i + 1}`, `trivia:qedit:${i}`),
+        inlineButton(`🗑 Delete #${i + 1}`, `trivia:qdel:${i}`),
+      ]);
     }
-    if (bank.length > 5) {
-      lines.push(`...and ${bank.length - 5} more.`);
+    if (bank.length > 10) {
+      lines.push(`\n...and ${bank.length - 10} more. Delete to see older ones.`);
     }
+
+    const kb = inlineKeyboard([
+      [
+        inlineButton("➕ Add one manually", "trivia:qadd"),
+        inlineButton("📥 Import CSV", "trivia:qcsv"),
+      ],
+      ...rows,
+      [inlineButton("🗑 Clear all custom", "trivia:qclear")],
+    ]);
+
+    const text = lines.join("\n");
+    if (ctx.callbackQuery?.message) {
+      await ctx.editMessageText(text, { reply_markup: kb, parse_mode: "HTML" });
+    } else {
+      await ctx.reply(text, { reply_markup: kb, parse_mode: "HTML" });
+    }
+    return;
   }
 
+  // Empty bank: just add/import/back
   const kb = inlineKeyboard([
     [
       inlineButton("➕ Add one manually", "trivia:qadd"),
       inlineButton("📥 Import CSV", "trivia:qcsv"),
     ],
-    ...(bank.length > 0
-      ? [[inlineButton("🗑 Clear all custom", "trivia:qclear")]]
-      : []),
   ]);
 
   const text = lines.join("\n");
@@ -89,6 +119,8 @@ composer.callbackQuery("trivia:qadd", async (ctx) => {
     await ctx.reply("Only group admins can manage questions.");
     return;
   }
+  // Set session gate so only the NEXT text message is treated as question input
+  ctx.session.questionImportMode = "pipe";
   await ctx.reply(
     "Send me a question to add. Use this format on ONE line:\n\n" +
       '<code>Category|Question text|Choice A|Choice B|Choice C|Choice D|CorrectIndex(0-3)</code>\n\n' +
@@ -105,6 +137,8 @@ composer.callbackQuery("trivia:qcsv", async (ctx) => {
     await ctx.reply("Only group admins can manage questions.");
     return;
   }
+  // Set session gate so only the NEXT text message is treated as CSV import
+  ctx.session.questionImportMode = "csv";
   await ctx.reply(
     "Send me a CSV text (or paste it). Each line is one question:\n\n" +
       '<code>Category,Question,Choice A,Choice B,Choice C,Choice D,CorrectIndex</code>\n\n' +
@@ -112,6 +146,82 @@ composer.callbackQuery("trivia:qcsv", async (ctx) => {
       '<code>Science,What is H2O?,Water,Salt,Sugar,Oil,0</code>',
     { parse_mode: "HTML" },
   );
+});
+
+// ── Per-question delete ──────────────────────────────────────────────────────
+composer.callbackQuery(/^trivia:qdel:(\d+)$/, async (ctx) => {
+  await ctx.answerCallbackQuery();
+  if (ctx.chat?.type !== "private" && !(await isAdmin(ctx))) {
+    await ctx.reply("Only group admins can manage questions.");
+    return;
+  }
+  const index = Number(ctx.match[1]);
+  const chatId = ctx.chat!.id;
+  const bank = await getQuestionBank(chatId);
+  const q = bank[index];
+  if (!q) {
+    await ctx.reply("That question no longer exists.");
+    return;
+  }
+
+  if (ctx.callbackQuery.message?.message_id) {
+    await ctx.api.editMessageText(
+      ctx.chat!.id,
+      ctx.callbackQuery.message.message_id,
+      `Delete this question?\n\n<b>${q.text}</b>`,
+      {
+        parse_mode: "HTML",
+        reply_markup: confirmKeyboard(`trivia:qdel:ok:${index}`),
+      },
+    );
+  }
+});
+
+composer.callbackQuery(/^trivia:qdel:ok:(\d+):yes$/, async (ctx) => {
+  await ctx.answerCallbackQuery({ text: "Deleted!" });
+  const index = Number(ctx.match[1]);
+  const chatId = ctx.chat!.id;
+  await deleteQuestion(chatId, index);
+  await showQManage(ctx);
+});
+
+composer.callbackQuery(/^trivia:qdel:ok:(\d+):no$/, async (ctx) => {
+  await ctx.answerCallbackQuery();
+  await showQManage(ctx);
+});
+
+// ── Per-question edit ────────────────────────────────────────────────────────
+composer.callbackQuery(/^trivia:qedit:(\d+)$/, async (ctx) => {
+  await ctx.answerCallbackQuery();
+  if (ctx.chat?.type !== "private" && !(await isAdmin(ctx))) {
+    await ctx.reply("Only group admins can manage questions.");
+    return;
+  }
+  const index = Number(ctx.match[1]);
+  const chatId = ctx.chat!.id;
+  const bank = await getQuestionBank(chatId);
+  const q = bank[index];
+  if (!q) {
+    await ctx.reply("That question no longer exists.");
+    return;
+  }
+
+  // Show editing instructions with current question data
+  await ctx.reply(
+    `Editing question #${index + 1}:\n\n` +
+      `<b>${q.text}</b>\n` +
+      `Category: ${q.category}\n` +
+      `Choices: ${q.choices.join(" | ")}\n` +
+      `Correct: ${q.choices[q.correctId]} (index ${q.correctId})\n\n` +
+      `Send me the updated question in this format:\n` +
+      '<code>Category|Question text|Choice A|Choice B|Choice C|Choice D|CorrectIndex(0-3)</code>\n\n' +
+      `The old question will be replaced. Send "cancel" to abort.`,
+    { parse_mode: "HTML" },
+  );
+
+  // Store the index being edited in session
+  ctx.session.questionImportMode = "pipe"; // reuse pipe parser
+  ctx.session.questionEditIndex = index;
 });
 
 // ── Clear all custom questions ──────────────────────────────────────────────
@@ -144,18 +254,25 @@ composer.callbackQuery("trivia:qclear:ok:no", async (ctx) => {
 });
 
 // ── Process question input (pipe-separated or CSV) ──────────────────────────
+// Gated by session.questionImportMode — only intercepts text when the user
+// explicitly entered question-import mode via the "Add" or "CSV" button.
 composer.on("message:text", async (ctx, next) => {
   // Only intercept when we're expecting question input
-  const text = ctx.message.text.trim();
-
-  // Check if this looks like a question import (pipe or comma separated)
-  const isPipe = text.includes("|") && text.split("|").length >= 7;
-  const isCsv = text.includes(",") && text.split(",").length >= 7 && !text.includes("|");
-
-  if (!isPipe && !isCsv) {
-    // Not a question import — let other handlers try
+  const mode = ctx.session.questionImportMode;
+  if (!mode) {
     return next();
   }
+
+  // Check for cancel
+  const text = ctx.message.text.trim();
+  if (text.toLowerCase() === "cancel") {
+    ctx.session.questionImportMode = undefined;
+    await ctx.reply("Cancelled importing questions.");
+    return;
+  }
+
+  // Clear the mode — one shot
+  ctx.session.questionImportMode = undefined;
 
   // Admin check for group chats
   if (ctx.chat?.type !== "private" && !(await isAdmin(ctx))) {
@@ -164,9 +281,65 @@ composer.on("message:text", async (ctx, next) => {
   }
 
   const chatId = ctx.chat!.id;
-  const separator = isPipe ? "|" : ",";
+  const separator = mode === "pipe" ? "|" : ",";
   const lines = text.split("\n").filter((l) => l.trim() !== "");
 
+  const editIndex = ctx.session.questionEditIndex;
+  if (editIndex !== undefined) {
+    ctx.session.questionEditIndex = undefined;
+    // Only single-line edit supported
+    return processEdit(ctx, chatId, editIndex, lines[0]?.trim() ?? text, separator);
+  }
+
+  return processImport(ctx, chatId, lines, separator);
+});
+
+async function processEdit(
+  ctx: Ctx,
+  chatId: number,
+  editIndex: number,
+  line: string,
+  separator: string,
+) {
+  const bank = await getQuestionBank(chatId);
+  if (editIndex < 0 || editIndex >= bank.length) {
+    await ctx.reply("That question no longer exists.");
+    return;
+  }
+
+  const parts = line.split(separator);
+  if (parts.length < 7) {
+    await ctx.reply(`Not enough fields — need 7, got ${parts.length}. Edit cancelled.`);
+    return;
+  }
+  const [category, qText, a, b, c, d, correctStr] = parts.map((s) => s.trim());
+  const correctId = Number(correctStr);
+  if (isNaN(correctId) || correctId < 0 || correctId > 3) {
+    await ctx.reply(`Correct index must be 0–3, got "${correctStr}". Edit cancelled.`);
+    return;
+  }
+  if (!qText) {
+    await ctx.reply("Question text can't be empty. Edit cancelled.");
+    return;
+  }
+
+  bank[editIndex] = {
+    category: category || "General",
+    text: qText,
+    choices: [a, b, c, d],
+    correctId,
+    sourceType: "custom",
+  };
+  await setQuestionBank(chatId, bank);
+  await ctx.reply(`✅ Question #${editIndex + 1} updated.`);
+}
+
+async function processImport(
+  ctx: Ctx,
+  chatId: number,
+  lines: string[],
+  separator: string,
+) {
   const added: string[] = [];
   const errors: string[] = [];
 
@@ -213,6 +386,6 @@ composer.on("message:text", async (ctx, next) => {
   }
 
   await ctx.reply(msg);
-});
+}
 
 export default composer;
