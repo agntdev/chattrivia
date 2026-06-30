@@ -124,7 +124,7 @@ describe("end-to-end game flow", () => {
     const calls = installCapture(bot);
 
     // ── Setup and launch ──
-    await bot.handleUpdate(textUpdate("/trivia_start"));
+    await bot.handleUpdate(textUpdate("/trivia start"));
     await bot.handleUpdate(callbackUpdate("trivia:cat:Science", stubMsgId));
     await bot.handleUpdate(callbackUpdate("trivia:count:2", stubMsgId));
     await bot.handleUpdate(callbackUpdate("trivia:go:Science:2:yes", stubMsgId));
@@ -221,7 +221,7 @@ describe("end-to-end game flow", () => {
     const calls = installCapture(bot);
 
     // Launch a game
-    await bot.handleUpdate(textUpdate("/trivia_start"));
+    await bot.handleUpdate(textUpdate("/trivia start"));
     await bot.handleUpdate(callbackUpdate("trivia:cat:Science", stubMsgId));
     await bot.handleUpdate(callbackUpdate("trivia:count:1", stubMsgId));
     await bot.handleUpdate(callbackUpdate("trivia:go:Science:1:yes", stubMsgId));
@@ -297,7 +297,7 @@ describe("leaderboard persistence", () => {
     )).toBe(true);
 
     // 2. Complete a 1-question game
-    await bot.handleUpdate(textUpdate("/trivia_start"));
+    await bot.handleUpdate(textUpdate("/trivia start"));
     await bot.handleUpdate(callbackUpdate("trivia:cat:Science", stubMsgId));
     await bot.handleUpdate(callbackUpdate("trivia:count:1", stubMsgId));
     await bot.handleUpdate(callbackUpdate("trivia:go:Science:1:yes", stubMsgId));

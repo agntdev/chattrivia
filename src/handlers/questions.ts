@@ -24,11 +24,7 @@ registerMainMenuItem({
 
 const composer = new Composer<Ctx>();
 
-// ── Entry: /trivia_add command ──────────────────────────────────────────────
-composer.command("trivia_add", async (ctx) => {
-  await showQManage(ctx);
-});
-
+// ── Entry: Button from main menu ─────────────────────────────────────────────
 composer.callbackQuery("trivia:qmanage", async (ctx) => {
   await ctx.answerCallbackQuery();
   await showQManage(ctx);
@@ -123,9 +119,9 @@ composer.callbackQuery("trivia:qadd", async (ctx) => {
   ctx.session.questionImportMode = "pipe";
   await ctx.reply(
     "Send me a question to add. Use this format on ONE line:\n\n" +
-      '<code>Category|Question text|Choice A|Choice B|Choice C|Choice D|CorrectIndex(0-3)</code>\n\n' +
+      '<code>Category|Question text|Choice A|Choice B|Choice C|Choice D|CorrectIndex(0-3)[|Explanation]</code>\n\n' +
       'Example:\n' +
-      '<code>Science|What is H2O?|Water|Salt|Sugar|Oil|0</code>',
+      '<code>Science|What is H2O?|Water|Salt|Sugar|Oil|0|Water is H₂O — two hydrogen and one oxygen.</code>',
     { parse_mode: "HTML" },
   );
 });
@@ -141,9 +137,9 @@ composer.callbackQuery("trivia:qcsv", async (ctx) => {
   ctx.session.questionImportMode = "csv";
   await ctx.reply(
     "Send me a CSV text (or paste it). Each line is one question:\n\n" +
-      '<code>Category,Question,Choice A,Choice B,Choice C,Choice D,CorrectIndex</code>\n\n' +
+      '<code>Category,Question,Choice A,Choice B,Choice C,Choice D,CorrectIndex[,Explanation]</code>\n\n' +
       'Example:\n' +
-      '<code>Science,What is H2O?,Water,Salt,Sugar,Oil,0</code>',
+      '<code>Science,What is H2O?,Water,Salt,Sugar,Oil,0,Water is H₂O — two hydrogen and one oxygen.</code>',
     { parse_mode: "HTML" },
   );
 });
@@ -212,9 +208,10 @@ composer.callbackQuery(/^trivia:qedit:(\d+)$/, async (ctx) => {
       `<b>${q.text}</b>\n` +
       `Category: ${q.category}\n` +
       `Choices: ${q.choices.join(" | ")}\n` +
-      `Correct: ${q.choices[q.correctId]} (index ${q.correctId})\n\n` +
-      `Send me the updated question in this format:\n` +
-      '<code>Category|Question text|Choice A|Choice B|Choice C|Choice D|CorrectIndex(0-3)</code>\n\n' +
+      `Correct: ${q.choices[q.correctId]} (index ${q.correctId})\n` +
+      (q.explanation ? `Explanation: ${q.explanation}\n` : "") +
+      `\nSend me the updated question in this format:\n` +
+      '<code>Category|Question text|Choice A|Choice B|Choice C|Choice D|CorrectIndex(0-3)[|Explanation]</code>\n\n' +
       `The old question will be replaced. Send "cancel" to abort.`,
     { parse_mode: "HTML" },
   );
@@ -351,10 +348,10 @@ async function processEdit(
 
   const parts = parseCSVLine(line, separator).map((s) => s.trim());
   if (parts.length < 7) {
-    await ctx.reply(`Not enough fields — need 7, got ${parts.length}. Edit cancelled.`);
+    await ctx.reply(`Not enough fields — need at least 7, got ${parts.length}. Edit cancelled.`);
     return;
   }
-  const [category, qText, a, b, c, d, correctStr] = parts;
+  const [category, qText, a, b, c, d, correctStr, explanation] = parts;
   const correctId = Number(correctStr);
   if (isNaN(correctId) || correctId < 0 || correctId > 3) {
     await ctx.reply(`Correct index must be 0–3, got "${correctStr}". Edit cancelled.`);
@@ -371,6 +368,7 @@ async function processEdit(
     choices: [a, b, c, d],
     correctId,
     sourceType: "custom",
+    explanation: explanation || undefined,
   };
   await setQuestionBank(chatId, bank);
   await ctx.reply(`✅ Question #${editIndex + 1} updated.`);
@@ -389,10 +387,10 @@ async function processImport(
     const line = lines[i].trim();
     const parts = parseCSVLine(line, separator).map((s) => s.trim());
     if (parts.length < 7) {
-      errors.push(`Line ${i + 1}: not enough fields (need 7, got ${parts.length})`);
+      errors.push(`Line ${i + 1}: not enough fields (need at least 7, got ${parts.length})`);
       continue;
     }
-    const [category, qText, a, b, c, d, correctStr] = parts;
+    const [category, qText, a, b, c, d, correctStr, explanation] = parts;
     const correctId = Number(correctStr);
     if (isNaN(correctId) || correctId < 0 || correctId > 3) {
       errors.push(`Line ${i + 1}: correct index must be 0–3, got "${correctStr}"`);
@@ -409,6 +407,7 @@ async function processImport(
       choices: [a, b, c, d],
       correctId,
       sourceType: "custom",
+      explanation: explanation || undefined,
     };
     await addQuestion(chatId, q);
     added.push(qText.slice(0, 40));

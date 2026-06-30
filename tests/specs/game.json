@@ -148,10 +148,10 @@
     ]
   },
   {
-    "name": "/trivia_start command shows category picker",
+    "name": "/trivia start command shows category picker",
     "steps": [
       {
-        "send": { "text": "/trivia_start" },
+        "send": { "text": "/trivia start" },
         "expect": [
           {
             "method": "sendMessage",
@@ -164,10 +164,10 @@
     ]
   },
   {
-    "name": "/trivia_stop without active game shows message",
+    "name": "/trivia stop without active game shows message",
     "steps": [
       {
-        "send": { "text": "/trivia_stop" },
+        "send": { "text": "/trivia stop" },
         "expect": [
           {
             "method": "sendMessage",
@@ -291,7 +291,7 @@
     ]
   },
   {
-    "name": "/trivia_stop cancels active game in private chat",
+    "name": "/trivia stop cancels active game in private chat",
     "steps": [
       {
         "send": { "callback": "trivia:start", "messageId": 1 },
@@ -322,7 +322,7 @@
         ]
       },
       {
-        "send": { "text": "/trivia_stop" },
+        "send": { "text": "/trivia stop" },
         "expect": [
           {
             "method": "sendMessage",
