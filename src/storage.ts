@@ -34,6 +34,22 @@ export class PersistentStore {
   async delete(key: string): Promise<void> {
     await this.adapter.delete(key);
   }
+
+  /**
+   * Atomic check-and-set: writes value only if key does NOT already exist.
+   * Returns true if the key was created, false if it already existed.
+   */
+  async setIfNotExists<T>(key: string, value: T): Promise<boolean> {
+    const adapter = this.adapter as StorageAdapter<T> & { setIfNotExists?: (k: string, v: T) => Promise<boolean> | boolean };
+    if (adapter.setIfNotExists) {
+      return adapter.setIfNotExists(key, value);
+    }
+    // Fallback: check then set (NOT atomic — only used for adapters without SET NX)
+    const existing = await this.adapter.read(key);
+    if (existing !== undefined) return false;
+    await this.adapter.write(key, value);
+    return true;
+  }
 }
 
 /** Singleton — created once per process. */
@@ -213,6 +229,23 @@ export async function saveActiveGame(game: ActiveGame): Promise<void> {
     idx.push(game.chatId);
     await store.set(keyGameIndex(), idx);
   }
+}
+
+/**
+ * Create a game atomically — only succeeds if no game exists for this chat.
+ * Returns the created game, or undefined if a game already exists.
+ */
+export async function createGameIfNotExists(game: ActiveGame): Promise<ActiveGame | undefined> {
+  const store = getStore();
+  const created = await store.setIfNotExists(keyActiveGame(game.chatId), game);
+  if (!created) return undefined;
+  // Maintain global index
+  const idx = await store.get<number[]>(keyGameIndex()) ?? [];
+  if (!idx.includes(game.chatId)) {
+    idx.push(game.chatId);
+    await store.set(keyGameIndex(), idx);
+  }
+  return game;
 }
 
 /** Delete the active game (when finished or cancelled). Also cleans the index. */

@@ -17,6 +17,7 @@ import {
   getActiveGame,
   saveActiveGame,
   deleteActiveGame,
+  createGameIfNotExists,
   getPlayer,
   getPlayerIds,
   savePlayer,
@@ -336,19 +337,12 @@ async function launchGame(ctx: Ctx, category: string, count: number) {
   // Clean up orphans
   await cleanupOrphanGame(chatId);
 
-  // Check again for active game
-  const existing = await getActiveGame(chatId);
-  if (existing && existing.state !== "finished") {
-    await ctx.reply("A game is already in progress in this chat!");
-    return;
-  }
-
-  // Gather questions: custom bank first, then default
+  // Gather questions BEFORE the atomic check — question bank is independent of
+  // game state, so gathering first keeps the critical section small.
   const customBank = await getQuestionBank(chatId);
   let pool: Question[];
   if (category === "Mixed") {
     pool = [...customBank];
-    // Add all default categories
     for (const cat of defaultCategories()) {
       pool.push(...defaultQuestionsByCategory(cat));
     }
@@ -380,7 +374,7 @@ async function launchGame(ctx: Ctx, category: string, count: number) {
 
   const actualCount = questions.length;
 
-  // Create the game
+  // Atomic game creation — SET NX prevents two concurrent games in one chat.
   const ts = now();
   const game: ActiveGame = {
     chatId,
@@ -397,7 +391,11 @@ async function launchGame(ctx: Ctx, category: string, count: number) {
     lastActivityAt: ts,
   };
 
-  await saveActiveGame(game);
+  const created = await createGameIfNotExists(game);
+  if (!created) {
+    await ctx.reply("A game is already in progress in this chat!");
+    return;
+  }
 
   // Announce
   await ctx.reply(

@@ -294,6 +294,48 @@ composer.on("message:text", async (ctx, next) => {
   return processImport(ctx, chatId, lines, separator);
 });
 
+// ── CSV parsing with quote support ────────────────────────────────────────────
+
+/**
+ * Split a single CSV/pipe-delimited line into fields, respecting double-quoted
+ * fields that may contain the separator character. Standard CSV rules:
+ *   - Fields containing the separator, double-quote, or newline are quoted.
+ *   - A double-quote inside a quoted field is escaped as "".
+ */
+function parseCSVLine(line: string, separator: string): string[] {
+  const fields: string[] = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (i + 1 < line.length && line[i + 1] === '"') {
+          // Escaped double-quote: "" → "
+          current += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        current += ch;
+      }
+    } else {
+      if (ch === '"' && current.length === 0) {
+        inQuotes = true;
+      } else if (ch === separator) {
+        fields.push(current);
+        current = "";
+      } else {
+        current += ch;
+      }
+    }
+  }
+  fields.push(current);
+  return fields;
+}
+
 async function processEdit(
   ctx: Ctx,
   chatId: number,
@@ -307,12 +349,12 @@ async function processEdit(
     return;
   }
 
-  const parts = line.split(separator);
+  const parts = parseCSVLine(line, separator).map((s) => s.trim());
   if (parts.length < 7) {
     await ctx.reply(`Not enough fields — need 7, got ${parts.length}. Edit cancelled.`);
     return;
   }
-  const [category, qText, a, b, c, d, correctStr] = parts.map((s) => s.trim());
+  const [category, qText, a, b, c, d, correctStr] = parts;
   const correctId = Number(correctStr);
   if (isNaN(correctId) || correctId < 0 || correctId > 3) {
     await ctx.reply(`Correct index must be 0–3, got "${correctStr}". Edit cancelled.`);
@@ -345,12 +387,12 @@ async function processImport(
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
-    const parts = line.split(separator);
+    const parts = parseCSVLine(line, separator).map((s) => s.trim());
     if (parts.length < 7) {
       errors.push(`Line ${i + 1}: not enough fields (need 7, got ${parts.length})`);
       continue;
     }
-    const [category, qText, a, b, c, d, correctStr] = parts.map((s) => s.trim());
+    const [category, qText, a, b, c, d, correctStr] = parts;
     const correctId = Number(correctStr);
     if (isNaN(correctId) || correctId < 0 || correctId > 3) {
       errors.push(`Line ${i + 1}: correct index must be 0–3, got "${correctStr}"`);

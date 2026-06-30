@@ -17,7 +17,7 @@ import { MemorySessionStorage } from "./memory.js";
  */
 export interface RedisLike {
   get(key: string): Promise<string | null>;
-  set(key: string, value: string): Promise<unknown>;
+  set(key: string, value: string, ...extra: string[]): Promise<unknown>;
   del(key: string): Promise<unknown>;
   keys(pattern: string): Promise<string[]>;
 }
@@ -63,6 +63,16 @@ export class RedisSessionStorage<T> implements StorageAdapter<T> {
   async *readAllKeys(): AsyncIterableIterator<string> {
     const keys = await this.client.keys(this.prefix + "*");
     for (const k of keys) yield k.slice(this.prefix.length);
+  }
+
+  /**
+   * Atomic SET NX — writes value only if the key does NOT already exist.
+   * Returns true if created, false if the key already existed.
+   */
+  async setIfNotExists(key: string, value: T): Promise<boolean> {
+    // ioredis: SET key value NX returns "OK" on success, null if key exists
+    const result = await this.client.set(this.k(key), JSON.stringify(value), "NX");
+    return result === "OK";
   }
 }
 
