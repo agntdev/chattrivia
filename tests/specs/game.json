@@ -178,5 +178,160 @@
         ]
       }
     ]
+  },
+  {
+    "name": "answer callback with no active game shows alert",
+    "steps": [
+      {
+        "send": { "callback": "ans:0", "messageId": 1 },
+        "expect": [
+          {
+            "method": "answerCallbackQuery",
+            "payload": {
+              "text": "No active question!"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "concurrent game attempt is blocked",
+    "steps": [
+      {
+        "send": { "callback": "trivia:start", "messageId": 1 },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          { "method": "sendMessage" }
+        ]
+      },
+      {
+        "send": { "callback": "trivia:cat:Science", "messageId": 1001 },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          { "method": "editMessageText" }
+        ]
+      },
+      {
+        "send": { "callback": "trivia:count:5", "messageId": 1001 },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          { "method": "editMessageText" }
+        ]
+      },
+      {
+        "send": { "callback": "trivia:go:Science:5:yes", "messageId": 1001 },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          { "method": "sendMessage" }
+        ]
+      },
+      {
+        "send": { "callback": "trivia:start", "messageId": 1002 },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          {
+            "method": "sendMessage",
+            "payload": {
+              "text": "A game is already in progress! Wait for it to finish or ask an admin to stop it."
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "duplicate answer from same user is rejected",
+    "steps": [
+      {
+        "send": { "callback": "trivia:start", "messageId": 1 },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          { "method": "sendMessage" }
+        ]
+      },
+      {
+        "send": { "callback": "trivia:cat:Science", "messageId": 1001 },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          { "method": "editMessageText" }
+        ]
+      },
+      {
+        "send": { "callback": "trivia:count:5", "messageId": 1001 },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          { "method": "editMessageText" }
+        ]
+      },
+      {
+        "send": { "callback": "trivia:go:Science:5:yes", "messageId": 1001 },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          { "method": "sendMessage" }
+        ]
+      },
+      {
+        "send": { "callback": "ans:0", "messageId": 1003 },
+        "expect": [
+          { "method": "answerCallbackQuery" }
+        ]
+      },
+      {
+        "send": { "callback": "ans:0", "messageId": 1003 },
+        "expect": [
+          {
+            "method": "answerCallbackQuery",
+            "payload": {
+              "text": "You already answered this one!"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "/trivia_stop cancels active game in private chat",
+    "steps": [
+      {
+        "send": { "callback": "trivia:start", "messageId": 1 },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          { "method": "sendMessage" }
+        ]
+      },
+      {
+        "send": { "callback": "trivia:cat:Science", "messageId": 1001 },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          { "method": "editMessageText" }
+        ]
+      },
+      {
+        "send": { "callback": "trivia:count:5", "messageId": 1001 },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          { "method": "editMessageText" }
+        ]
+      },
+      {
+        "send": { "callback": "trivia:go:Science:5:yes", "messageId": 1001 },
+        "expect": [
+          { "method": "answerCallbackQuery" },
+          { "method": "sendMessage" }
+        ]
+      },
+      {
+        "send": { "text": "/trivia_stop" },
+        "expect": [
+          {
+            "method": "sendMessage",
+            "payload": {
+              "text": "Game stopped! Scores from this round won't be saved."
+            }
+          }
+        ]
+      }
+    ]
   }
 ]

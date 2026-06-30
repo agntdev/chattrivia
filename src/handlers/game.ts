@@ -18,6 +18,7 @@ import {
   saveActiveGame,
   deleteActiveGame,
   getPlayer,
+  getPlayerIds,
   savePlayer,
   getConfig,
   getQuestionBank,
@@ -605,6 +606,9 @@ async function finishGame(ctx: Ctx, game: ActiveGame) {
   await deleteActiveGame(game.chatId);
 
   await ctx.reply(formatFinalResults(game.players), { parse_mode: "HTML" });
+
+  // Post a compact leaderboard snapshot so standings are visible right away.
+  await postLeaderboardSnapshot(ctx, game.chatId);
 }
 
 // ── Cancel game ─────────────────────────────────────────────────────────────
@@ -659,6 +663,34 @@ export function stopOrphanSweep(): void {
   if (orphanSweepInterval) {
     clearInterval(orphanSweepInterval);
     orphanSweepInterval = undefined;
+  }
+}
+
+// ── Post-round leaderboard snapshot ────────────────────────────────────────
+async function postLeaderboardSnapshot(ctx: Ctx, chatId: number): Promise<void> {
+  const ids = await getPlayerIds(chatId);
+  if (ids.length === 0) return;
+
+  const players: Player[] = [];
+  for (const uid of ids) {
+    const p = await getPlayer(chatId, uid);
+    if (p) players.push(p);
+  }
+  players.sort((a, b) => b.cumulativeScore - a.cumulativeScore);
+  if (players.length === 0) return;
+
+  // Show top 5
+  const top5 = players.slice(0, 5);
+  const lines: string[] = ["📊 <b>Leaderboard</b>"];
+  top5.forEach((p, i) => {
+    const star = i === 0 ? " ⭐" : "";
+    lines.push(`${i + 1}. ${p.firstName}: ${p.cumulativeScore} pts${star}`);
+  });
+
+  try {
+    await ctx.reply(lines.join("\n"), { parse_mode: "HTML" });
+  } catch {
+    // Best-effort — don't crash the game finish flow
   }
 }
 
