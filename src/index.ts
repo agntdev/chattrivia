@@ -12,7 +12,11 @@ async function main() {
   const bot = await buildBot(token);
   // Publish the "/" command list to Telegram (discoverability). A button-first
   // bot exposes only /start + /help; everything else is reached via menu buttons.
-  await setDefaultCommands(bot);
+  await setDefaultCommands(bot, [
+    { command: "leaderboard", description: "See all-time rankings" },
+    { command: "mystats", description: "Your personal trivia stats" },
+    { command: "trivia", description: "Start, stop, or manage trivia games" },
+  ]);
 
   // Periodically sweep abandoned games (no activity for 5 min) so stale state
   // doesn't block new games. The sweep reads the global game-index from persistent
